@@ -7,6 +7,17 @@ project(knor
     LANGUAGES C CXX
 )
 
+# Knor is run from build/, never `cmake --install .`d. Override install() as
+# a no-op for the duration of add_subdirectory(libs) so the install(EXPORT
+# oink-targets ...) call in libs/oink/CMakeLists.txt — which references the
+# lace target without lace being in any export set in our nested build — does
+# not abort the configure step. (CMAKE_SKIP_INSTALL_RULES is checked at
+# install-time, not generate-time, so it does not suppress this error.)
+function(install)
+endfunction()
+function(export)
+endfunction()
+
 add_subdirectory(libs)
 
 
