@@ -22,7 +22,8 @@ uint64_t CACHE_DECODE_BLOCK = 0;
 uint64_t CACHE_REFINE = 0;
 uint64_t CACHE_APPLY_PARTITION = 0;
 
-TASK_1(BDD, encode_block, uint64_t, b)
+TASK(BDD, encode_block, uint64_t, b);
+BDD encode_block_CALL(lace_worker* lace, uint64_t b)
 {
     BDD result;
     if (cache_get3(CACHE_ENCODE_BLOCK, 0, b, 0, &result)) return result;
@@ -39,7 +40,8 @@ TASK_1(BDD, encode_block, uint64_t, b)
     return result;
 }
 
-TASK_1(uint64_t, decode_block, BDD, block)
+TASK(uint64_t, decode_block, BDD, block);
+uint64_t decode_block_CALL(lace_worker* lace, BDD block)
 {
     uint64_t result = 0;
     if (cache_get3(CACHE_DECODE_BLOCK, block, 0, 0, &result)) return result;
@@ -93,12 +95,13 @@ prepare_refine()
     refine_iteration++;
 }
 
-TASK_2(BDD, assign_block, BDD, sig, BDD, previous_block)
+TASK(BDD, assign_block, BDD, sig, BDD, previous_block);
+BDD assign_block_CALL(lace_worker* lace, BDD sig, BDD previous_block)
 {
     assert(previous_block != mtbdd_false); // if so, incorrect call!
 
     // maybe do garbage collection
-    sylvan_gc_test();
+    sylvan_gc_test(lace);
 
     if (sig == sylvan_false) {
         // slightly different handling because sylvan_false == 0
@@ -106,7 +109,7 @@ TASK_2(BDD, assign_block, BDD, sig, BDD, previous_block)
     }
 
     // try to claim previous block number
-    const uint64_t p_b = CALL(decode_block, previous_block);
+    const uint64_t p_b = decode_block_CALL(lace, previous_block);
     assert(p_b != 0);
 
     for (;;) {
@@ -126,7 +129,7 @@ TASK_2(BDD, assign_block, BDD, sig, BDD, previous_block)
         loc_next = (*(volatile uint32_t*)&e->next[k]) & 0x7fffffff;
         if (loc_next != 0 && signatures[loc_next].sig == sig && signatures[loc_next].prev == p_b) {
             /* found */
-            return CALL(encode_block, loc_next);
+            return encode_block_CALL(lace, loc_next);
         } else if (loc_next != 0 && signatures[loc_next].sig == sig && signatures[loc_next].prev < p_b) {
             /* go right */
             loc = loc_next;
@@ -159,7 +162,7 @@ TASK_2(BDD, assign_block, BDD, sig, BDD, previous_block)
     signatures[loc].next[0] = b_nr; // TODO make the "next" pointer atomic
 
     /* determine height */
-    uint64_t h = 1 + __builtin_clz(LACE_TRNG) / 2;
+    uint64_t h = 1 + __builtin_clz((uint32_t)lace_rng(lace)) / 2;
     if (h > SL_DEPTH) h = SL_DEPTH;
 
     /* go up and create links */
@@ -180,10 +183,11 @@ TASK_2(BDD, assign_block, BDD, sig, BDD, previous_block)
         }
     }
 
-    return CALL(encode_block, b_nr);
+    return encode_block_CALL(lace, b_nr);
 }
 
-TASK_4(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_partition)
+TASK(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_partition);
+BDD refine_partition_CALL(lace_worker* lace, BDD dd, BDD s_vars, BDD ns_vars, BDD previous_partition)
 {
     // expecting dd as in s,a,B
     // expecting s_vars and ns_vars to be the set of variables of states / next states
@@ -198,13 +202,13 @@ TASK_4(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_
         // vars is empty, so we've reached a signature node! assign block and return
         BDD result;
         if (cache_get3(CACHE_REFINE, dd, s_vars, previous_partition, &result)) return result;
-        result = CALL(assign_block, dd, previous_partition);
+        result = assign_block_CALL(lace, dd, previous_partition);
         cache_put3(CACHE_REFINE, dd, s_vars, previous_partition, result);
         return result;
     }
 
     // check if we need to do garbage collection
-    sylvan_gc_test();
+    sylvan_gc_test(lace);
 
     /* vars != sylvan_false */
     /* dd cannot be sylvan_true - if vars != sylvan_true, then dd is in a,B */
@@ -217,7 +221,7 @@ TASK_4(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_
     while (s_vars_var < dd_var && ns_vars_var < pp_var) {
         s_vars = sylvan_set_next(s_vars);
         ns_vars = sylvan_set_next(ns_vars);
-        if (sylvan_set_isempty(s_vars)) return CALL(refine_partition, dd, s_vars, ns_vars, previous_partition);
+        if (sylvan_set_isempty(s_vars)) return refine_partition_CALL(lace, dd, s_vars, ns_vars, previous_partition);
         s_vars_var = sylvan_set_first(s_vars);
         ns_vars_var = sylvan_set_first(ns_vars);
     }
@@ -248,9 +252,9 @@ TASK_4(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_
     /* Recursive steps */
     BDD next_s_vars = sylvan_set_next(s_vars);
     BDD next_ns_vars = sylvan_set_next(ns_vars);
-    bdd_refs_spawn(SPAWN(refine_partition, dd_low, next_s_vars, next_ns_vars, pp_low));
-    BDD high = bdd_refs_push(CALL(refine_partition, dd_high, next_s_vars, next_ns_vars, pp_high));
-    BDD low = bdd_refs_sync(SYNC(refine_partition));
+    bdd_refs_spawn(refine_partition_SPAWN(lace, dd_low, next_s_vars, next_ns_vars, pp_low));
+    BDD high = bdd_refs_push(refine_partition_CALL(lace, dd_high, next_s_vars, next_ns_vars, pp_high));
+    BDD low = bdd_refs_sync(refine_partition_SYNC(lace));
     bdd_refs_pop(1);
 
     /* rename from s to t */
@@ -261,10 +265,11 @@ TASK_4(BDD, refine_partition, BDD, dd, BDD, s_vars, BDD, ns_vars, BDD, previous_
     return result;
 }
 
-TASK_4(BDD, refine, MTBDD, signature, BDD, s_vars, BDD, ns_vars, BDD, previous_partition)
+TASK(BDD, refine, MTBDD, signature, BDD, s_vars, BDD, ns_vars, BDD, previous_partition);
+BDD refine_CALL(lace_worker* lace, MTBDD signature, BDD s_vars, BDD ns_vars, BDD previous_partition)
 {
     prepare_refine();
-    return CALL(refine_partition, signature, s_vars, ns_vars, previous_partition);
+    return refine_partition_CALL(lace, signature, s_vars, ns_vars, previous_partition);
 }
 
 size_t
@@ -302,14 +307,14 @@ free_refine_data()
     }
 }
 
-TASK_IMPL_2(MTBDD, min_lts_strong, SymGame*, sym, bool, strip_priority)
+MTBDD min_lts_strong_CALL(lace_worker* lace, SymGame* sym, bool strip_priority)
 {
     next_block = 1;
     refine_iteration = 0;
 
     // first get the transition relation without the priorities
     //  i.e., only keep s > uap > cap > ns
-    MTBDD trans = strip_priority ? sylvan_exists(sym->trans, sym->np_vars) : sym->trans;
+    MTBDD trans = strip_priority ? sylvan_exists(sym->trans, sym->np_vars, 0) : sym->trans;
     mtbdd_refs_pushptr(&trans);
 
     // next, get state data, prepare blocks
@@ -334,7 +339,7 @@ TASK_IMPL_2(MTBDD, min_lts_strong, SymGame*, sym, bool, strip_priority)
     mtbdd_refs_pushptr(&signature);
 
     // initial partition!
-    partition = CALL(encode_block, get_next_block());
+    partition = encode_block_CALL(lace, get_next_block());
 
     // find all states with a transition in trans and add them 
     // (assumption is that all states have successors)
@@ -352,8 +357,8 @@ TASK_IMPL_2(MTBDD, min_lts_strong, SymGame*, sym, bool, strip_priority)
             _n = mtbdd_set_next(_n);
             s_to_ns = mtbdd_map_add(s_to_ns, sv, sylvan_ithvar(nv));
         }
-        states = sylvan_compose(states, s_to_ns);
-        partition = sylvan_ite(states, partition, mtbdd_false);
+        states = sylvan_compose(states, s_to_ns, 0);
+        partition = sylvan_ite(states, partition, mtbdd_false, 0);
         mtbdd_refs_popptr(2); // states and s_to_ns
     }
 
@@ -366,13 +371,13 @@ TASK_IMPL_2(MTBDD, min_lts_strong, SymGame*, sym, bool, strip_priority)
         iterations++;
 
         // std::cerr << "current partition:" << std::endl;
-        // CALL(print_partition, sym, partition);
+        // print_partition_CALL(lace, sym, partition);
 
         // compute signature: s > uap > cap > B
         //                or: s > uap > cap > prio > B
-        signature = sylvan_and_exists(trans, partition, sym->ns_vars);
+        signature = sylvan_and_exists(trans, partition, sym->ns_vars, 0);
         CACHE_REFINE = cache_next_opid(); // each refine needs fresh cache
-        partition = CALL(refine, signature, sym->s_vars, sym->ns_vars, partition);
+        partition = refine_CALL(lace, signature, sym->s_vars, sym->ns_vars, partition);
         n_blocks = count_blocks();
         signature = mtbdd_false; // sneaky unref
     }
@@ -392,7 +397,8 @@ static uint64_t state_0_block = 0;
  * Apply partition, ie assuming partition is defined on s_vars -> block_variables
  * and converts block to the ns_vars (typically short version of s_vars)
  */
-TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD, new_s_vars)
+TASK(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD, new_s_vars);
+MTBDD apply_partition_CALL(lace_worker* lace, MTBDD dd, MTBDD partition, MTBDD s_vars, MTBDD new_s_vars)
 {
     // either partition on s,B and s_vars=s and b_to_s B->s
     //   or   partition on t,B and s_vars=t and b_to_s B->t
@@ -415,7 +421,7 @@ TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD
     }
 
     // check if we need to do garbage collection
-    sylvan_gc_test();
+    sylvan_gc_test(lace);
 
     // no need to check s_vars / new_s_vars since we'll change CACHE_APPLY_PARTITION
     BDD result;
@@ -427,7 +433,7 @@ TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD
     if (mtbdd_set_isempty(s_vars)) {
         assert(mtbdd_getvar(partition) == mtbdd_set_first(block_variables));
 
-        uint64_t block_no = CALL(decode_block, partition);
+        uint64_t block_no = decode_block_CALL(lace, partition);
         // std::cerr << "pre: block " << block_no << std::endl;
         if (block_no == state_0_block) block_no = 1;
         else if (block_no == 1) block_no = state_0_block;
@@ -452,7 +458,7 @@ TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD
             }
         }
 
-        result = sylvan_and(result, dd);
+        result = sylvan_and(result, dd, 0);
         mtbdd_refs_popptr(1);
 
         /* cache and return */
@@ -478,9 +484,9 @@ TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD
     }
 
     // compute recursive results
-    mtbdd_refs_spawn(SPAWN(apply_partition, dd_low, partition_low, s_vars, new_s_vars));
-    BDD high = mtbdd_refs_push(CALL(apply_partition, dd_high, partition_high, s_vars, new_s_vars));
-    BDD low = mtbdd_refs_push(mtbdd_refs_sync(SYNC(apply_partition)));
+    mtbdd_refs_spawn(apply_partition_SPAWN(lace, dd_low, partition_low, s_vars, new_s_vars));
+    BDD high = mtbdd_refs_push(apply_partition_CALL(lace, dd_high, partition_high, s_vars, new_s_vars));
+    BDD low = mtbdd_refs_push(mtbdd_refs_sync(apply_partition_SYNC(lace)));
 
     // Now depending on whether the current var is in s_vars or not we return...
     bool is_s_var = mtbdd_set_first(s_vars) == top_var;
@@ -510,13 +516,13 @@ TASK_4(MTBDD, apply_partition, MTBDD, dd, MTBDD, partition, MTBDD, s_vars, MTBDD
     return result;
 }
 
-VOID_TASK_IMPL_3(minimize, SymGame*, sym, MTBDD, partition, bool, verbose)
+void minimize_CALL(lace_worker* lace, SymGame* sym, MTBDD partition, bool verbose)
 {
     // first, find out where state 0 goes
     {
         MTBDD _p = partition;
         while (mtbdd_getvar(_p) < mtbdd_set_first(block_variables)) _p = mtbdd_getlow(_p);
-        state_0_block = CALL(decode_block, _p);
+        state_0_block = decode_block_CALL(lace, _p);
     }
 
     // get number of blocks
@@ -569,7 +575,7 @@ VOID_TASK_IMPL_3(minimize, SymGame*, sym, MTBDD, partition, bool, verbose)
     // run on next state (only trans)
     CACHE_APPLY_PARTITION = cache_next_opid();
     // if (verbose) std::cerr << "applying partition to next states of transition relation" << std::endl;
-    sym->trans = CALL(apply_partition, sym->trans, partition, sym->ns_vars, block_ns_vars);
+    sym->trans = apply_partition_CALL(lace, sym->trans, partition, sym->ns_vars, block_ns_vars);
     // sym->print_trans();
     
     // change partition to s -> B
@@ -579,10 +585,10 @@ VOID_TASK_IMPL_3(minimize, SymGame*, sym, MTBDD, partition, bool, verbose)
     // run on state (trans and strategies)
     CACHE_APPLY_PARTITION = cache_next_opid();
     // if (verbose) std::cerr << "applying partition to current states of transition relation" << std::endl;
-    sym->trans = CALL(apply_partition, sym->trans, partition, sym->s_vars, block_s_vars);
+    sym->trans = apply_partition_CALL(lace, sym->trans, partition, sym->s_vars, block_s_vars);
     // sym->print_trans();
     // if (verbose) std::cerr << "applying partition to states of strategies" << std::endl;
-    sym->strategies = CALL(apply_partition, sym->strategies, partition, sym->s_vars, block_s_vars);
+    sym->strategies = apply_partition_CALL(lace, sym->strategies, partition, sym->s_vars, block_s_vars);
     // sym->print_strategies();
 
     sym->s_vars = block_s_vars;
@@ -596,7 +602,7 @@ VOID_TASK_IMPL_3(minimize, SymGame*, sym, MTBDD, partition, bool, verbose)
 }
 
 
-VOID_TASK_IMPL_2(print_partition, SymGame*, game, MTBDD, partition)
+void print_partition_CALL(lace_worker* lace, SymGame* game, MTBDD partition)
 {
     uint8_t arr[game->statebits+1];
     MTBDD lf = mtbdd_enum_all_first(partition, game->ns_vars, arr, NULL);
@@ -611,14 +617,14 @@ VOID_TASK_IMPL_2(print_partition, SymGame*, game, MTBDD, partition)
         // std::cerr << "top var of lf is " << mtbdd_getvar(lf) << std::endl;
         assert(mtbdd_getvar(lf) == mtbdd_set_first(block_variables));
         // decode block
-        uint64_t block = CALL(decode_block, lf);
+        uint64_t block = decode_block_CALL(lace, lf);
         std::cerr << "state " << state << ": " << block << std::endl;
         lf = mtbdd_enum_all_next(partition, game->ns_vars, arr, NULL);
     }
 }
 
 
-VOID_TASK_IMPL_2(print_signature, SymGame*, game, MTBDD, signature)
+void print_signature_CALL(lace_worker* lace, SymGame* game, MTBDD signature)
 {
     MTBDD vars = mtbdd_set_empty();
     mtbdd_protect(&vars);
@@ -655,7 +661,7 @@ VOID_TASK_IMPL_2(print_signature, SymGame*, game, MTBDD, signature)
             if (arr[idx++]) prio |= 1;
         }
         // decode block
-        uint64_t block = CALL(decode_block, lf);
+        uint64_t block = decode_block_CALL(lace, lf);
         assert(idx == mtbdd_set_count(vars));
         // std::cerr << "from " << state << " uap " << uap << ": " << cap << " --> (" << prio << ") " << block << std::endl;
         lf = mtbdd_enum_all_next(signature, vars, arr, NULL);

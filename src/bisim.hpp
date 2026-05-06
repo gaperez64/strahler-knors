@@ -14,9 +14,9 @@ extern "C" {
 
 // Bisimulation minimisation
 
-TASK_DECL_2(sylvan::MTBDD, min_lts_strong, SymGame*, bool);
-VOID_TASK_DECL_3(minimize, SymGame*, sylvan::MTBDD, bool);
-VOID_TASK_DECL_2(print_partition, SymGame*, sylvan::MTBDD)
-VOID_TASK_DECL_2(print_signature, SymGame*, sylvan::MTBDD)
+TASK(sylvan::MTBDD, min_lts_strong, SymGame*, sym, bool, strip_priority);
+TASK(void, minimize, SymGame*, sym, sylvan::MTBDD, partition, bool, verbose);
+TASK(void, print_partition, SymGame*, game, sylvan::MTBDD, partition);
+TASK(void, print_signature, SymGame*, game, sylvan::MTBDD, signature);
 
 size_t count_blocks();

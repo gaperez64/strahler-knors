@@ -76,6 +76,42 @@ eHOA is HOA extended to record which atomic propositions are controllable, thus 
 See:
 1. Guillermo A. Pérez (2019). The Extended HOA Format for Synthesis. In CoRR, [http://arxiv.org/abs/1912.05793](http://arxiv.org/abs/1912.05793).
 
+## Docker image (strahler-knor)
+
+Each push to `master` (and each release) publishes a multi-arch image to
+`ghcr.io/<owner>/strahler-knors` for both `linux/amd64` and `linux/arm64`.
+The image ships **sources only** so that the user compiles knor inside the
+container with `-march=native` — important because the `--strpm-simd` solver
+exploits host-specific vector instructions that would be lost if the binary
+were cross-compiled at image-build time.
+
+Typical workflow:
+
+```bash
+# Pull (without --rm so the compiled binary survives between runs)
+docker pull ghcr.io/<owner>/strahler-knors:latest
+docker run -it --name knor ghcr.io/<owner>/strahler-knors:latest
+
+# Inside the container: compile once with -march=native
+./scripts/compile.sh
+
+# Run knor with --strpm-simd, file on the command line ...
+./scripts/knor-strpm-simd.sh examples/full_arbiter_2.tlsf.ehoa -a
+
+# ... or piped from stdin
+cat spec.ehoa | ./scripts/knor-strpm-simd.sh -a -v --bisim --onehot
+```
+
+To preserve the compiled binary across docker runs, snapshot the container
+once `compile.sh` has finished:
+
+```bash
+docker commit knor strahler-knors:compiled
+```
+
+The wrapper exits with `10` (realizable) or `20` (unrealizable), matching
+knor's own conventions; any other code indicates a parse/runtime error.
+
 ## StarExec support
 
 For the [SYNTCOMP competition](http://www.syntcomp.org/), the `prepare_se.sh` script prepares a gzipped tarball `knor.tar.gz` which can be uploaded to the StarExec environment.

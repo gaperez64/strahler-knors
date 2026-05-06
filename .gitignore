@@ -1,3 +1,9 @@
 # ignore build directory
 build
 examples/*ehoa-*
+# ABC writes a history file on exit
+abc.history
+# nuXmv binary used by the test scripts is fetched separately
+test/nuXmv
+# Local Claude Code settings
+.claude/

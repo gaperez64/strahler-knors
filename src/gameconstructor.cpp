@@ -81,7 +81,8 @@ evalLabelNaive(BTree* label, Alias* aliases, int numAliases, int numAPs, int* ap
  * Convert a transition label (Btree) to a BDD encoding the label
  * a label is essentially a boolean combination of atomic propositions and aliases
  */
-TASK_3(MTBDD, evalLabel, BTree*, label, HoaData*, data, uint32_t*, variables)
+TASK(MTBDD, evalLabel, BTree*, label, HoaData*, data, uint32_t*, variables);
+MTBDD evalLabel_CALL(lace_worker* lace, BTree* label, HoaData* data, uint32_t* variables)
 {
     MTBDD left;
     MTBDD right;
@@ -90,23 +91,23 @@ TASK_3(MTBDD, evalLabel, BTree*, label, HoaData*, data, uint32_t*, variables)
         case NT_BOOL:
             return label->id ? mtbdd_true : mtbdd_false;
         case NT_AND:
-            left = CALL(evalLabel, label->left, data, variables);
+            left = evalLabel_CALL(lace, label->left, data, variables);
             mtbdd_refs_pushptr(&left);
-            right = CALL(evalLabel, label->right, data, variables);
+            right = evalLabel_CALL(lace, label->right, data, variables);
             mtbdd_refs_pushptr(&right);
-            result = sylvan_and(left, right);
+            result = sylvan_and(left, right, 0);
             mtbdd_refs_popptr(2);
             return result;
         case NT_OR:
-            left = CALL(evalLabel, label->left, data, variables);
+            left = evalLabel_CALL(lace, label->left, data, variables);
             mtbdd_refs_pushptr(&left);
-            right = CALL(evalLabel, label->right, data, variables);
+            right = evalLabel_CALL(lace, label->right, data, variables);
             mtbdd_refs_pushptr(&right);
             result = sylvan_or(left, right);
             mtbdd_refs_popptr(2);
             return result;
         case NT_NOT:
-            left = CALL(evalLabel, label->left, data, variables);
+            left = evalLabel_CALL(lace, label->left, data, variables);
             mtbdd_refs_pushptr(&left);
             result = sylvan_not(left);
             mtbdd_refs_popptr(1);
@@ -118,7 +119,7 @@ TASK_3(MTBDD, evalLabel, BTree*, label, HoaData*, data, uint32_t*, variables)
             for (int i=0; i<data->noAliases; i++) {
                 Alias *a = data->aliases+i;
                 if (strcmp(a->alias, label->alias) == 0) {
-                    return CALL(evalLabel, a->labelExpr, data, variables);
+                    return evalLabel_CALL(lace, a->labelExpr, data, variables);
                 }
             }
             return mtbdd_invalid;
@@ -155,7 +156,8 @@ int GameConstructor::adjustPriority(int p, bool maxPriority, bool controllerIsOd
 /**
  * Construct and solve the game explicitly
  */
-TASK_3(pg::Game*, constructGameNaive, HoaData*, data, bool, isMaxParity, bool, controllerIsOdd)
+TASK(pg::Game*, constructGameNaive, HoaData*, data, bool, isMaxParity, bool, controllerIsOdd);
+pg::Game* constructGameNaive_CALL(lace_worker* lace, HoaData* data, bool isMaxParity, bool controllerIsOdd)
 {
     // Set which APs are controllable in the bitset controllable
     pg::bitset controllable(data->noAPs);
@@ -284,7 +286,8 @@ MTBDD collect_targets(MTBDD trans, std::set<uint64_t> &res, MTBDD statevars, MTB
 /**
  * Construct and solve the game explicitly
  */
-TASK_3(pg::Game*, constructGame, HoaData *, data, bool, isMaxParity, bool, controllerIsOdd)
+TASK(pg::Game*, constructGame, HoaData *, data, bool, isMaxParity, bool, controllerIsOdd);
+pg::Game* constructGame_CALL(lace_worker* lace, HoaData * data, bool isMaxParity, bool controllerIsOdd)
 {
     // Set which APs are controllable in the bitset controllable
     pg::bitset controllable(data->noAPs);
@@ -371,7 +374,7 @@ TASK_3(pg::Game*, constructGame, HoaData *, data, bool, isMaxParity, bool, contr
                 priority = GameConstructor::adjustPriority(trans->accSig[0], isMaxParity, controllerIsOdd, data->noAccSets);
             }
             // translate the label to a BDD
-            lblbdd = RUN(evalLabel, label, data, variables);
+            lblbdd = evalLabel(label, data, variables);
             leaf = mtbdd_int64(((uint64_t)priority << 32) | (uint64_t)(trans->successors[0]));
             // add the transition to the transition BDD
             trans_bdd = mtbdd_ite(lblbdd, leaf, trans_bdd);
@@ -540,7 +543,7 @@ std::unique_ptr<SymGame> GameConstructor::constructSymGame(HoaData *data, bool i
             if (succ == 0) succ = vstart;
             else if (succ == vstart) succ = 0;
             // encode the label as a MTBDD
-            lblbdd = RUN(evalLabel, label, data, variables);
+            lblbdd = evalLabel(label, data, variables);
             // encode priostate (leaf) and update transition relation
             leaf = BDDTools::encode_priostate(succ, priority, res->ns_vars, res->np_vars);
             // trans := lbl THEN leaf ELSE trans
@@ -567,10 +570,10 @@ std::unique_ptr<SymGame> GameConstructor::constructSymGame(HoaData *data, bool i
 
 
 pg::Game* GameConstructor::constructGameNaive(HoaData *data, bool isMaxParity, bool controllerIsOdd) {
-    return RUN(constructGameNaive, data, isMaxParity, controllerIsOdd);
+    return constructGameNaive(data, isMaxParity, controllerIsOdd);
 }
 
 
 pg::Game* GameConstructor::constructGame(HoaData *data, bool isMaxParity, bool controllerIsOdd) {
-    return RUN(constructGame, data, isMaxParity, controllerIsOdd);
+    return constructGame(data, isMaxParity, controllerIsOdd);
 }

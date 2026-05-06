@@ -34,7 +34,8 @@ void BDDTools::collectSubroots(MTBDD root, uint32_t firstVar, std::set<sylvan::M
     }
 }
 
-TASK_3(MTBDD, paths_to_subroot, MTBDD, bdd, uint32_t, firstvar, MTBDD, subroot)
+TASK(MTBDD, paths_to_subroot, MTBDD, bdd, uint32_t, firstvar, MTBDD, subroot);
+MTBDD paths_to_subroot_CALL(lace_worker* lace, MTBDD bdd, uint32_t firstvar, MTBDD subroot)
 {
     // TODO might need caching...
     if (bdd == subroot) {
@@ -43,9 +44,9 @@ TASK_3(MTBDD, paths_to_subroot, MTBDD, bdd, uint32_t, firstvar, MTBDD, subroot)
         return mtbdd_false;
     } else {
         auto var = mtbdd_getvar(bdd);
-        mtbdd_refs_spawn(SPAWN(paths_to_subroot, mtbdd_gethigh(bdd), firstvar, subroot));
-        MTBDD low = mtbdd_refs_push(CALL(paths_to_subroot, mtbdd_getlow(bdd), firstvar, subroot));
-        MTBDD high = mtbdd_refs_push(mtbdd_refs_sync(SYNC(paths_to_subroot)));
+        mtbdd_refs_spawn(paths_to_subroot_SPAWN(lace, mtbdd_gethigh(bdd), firstvar, subroot));
+        MTBDD low = mtbdd_refs_push(paths_to_subroot_CALL(lace, mtbdd_getlow(bdd), firstvar, subroot));
+        MTBDD high = mtbdd_refs_push(mtbdd_refs_sync(paths_to_subroot_SYNC(lace)));
         MTBDD res = mtbdd_makenode(var, low, high);
         mtbdd_refs_pop(2);
         return res;
@@ -54,7 +55,7 @@ TASK_3(MTBDD, paths_to_subroot, MTBDD, bdd, uint32_t, firstvar, MTBDD, subroot)
 
 MTBDD BDDTools::pathsToSubroot(MTBDD root, uint32_t firstVar, MTBDD subroot)
 {
-    return RUN(paths_to_subroot, root, firstVar, subroot);
+    return paths_to_subroot(root, firstVar, subroot);
 }
 
 /**

@@ -88,37 +88,38 @@ SymGame::~SymGame()
 /**
  * Given a strategy, if there is choice, choose the zero edge
  */
-TASK_2(MTBDD, clarify, MTBDD, str, MTBDD, cap_vars)
+TASK(MTBDD, clarify, MTBDD, str, MTBDD, cap_vars);
+MTBDD clarify_CALL(lace_worker* lace, MTBDD str, MTBDD cap_vars)
 {
     if (mtbdd_set_isempty(cap_vars)) return str;
 
     uint32_t next_cap = mtbdd_getvar(cap_vars);
     if (mtbdd_isleaf(str)) {
         // str is leaf but we have variables to set to 0!
-        MTBDD low = CALL(clarify, str, mtbdd_set_next(cap_vars));
+        MTBDD low = clarify_CALL(lace, str, mtbdd_set_next(cap_vars));
         return mtbdd_makenode(next_cap, low, mtbdd_false);
     } else {
         uint32_t var = mtbdd_getvar(str);
         if (var < next_cap) {
             // not at controllable variables yet!
-            MTBDD low = CALL(clarify, mtbdd_getlow(str), cap_vars);
+            MTBDD low = clarify_CALL(lace, mtbdd_getlow(str), cap_vars);
             mtbdd_refs_push(low);
-            MTBDD high = CALL(clarify, mtbdd_gethigh(str), cap_vars);
+            MTBDD high = clarify_CALL(lace, mtbdd_gethigh(str), cap_vars);
             mtbdd_refs_pop(1);
             return mtbdd_makenode(var, low, high);
         } else if (next_cap < var) {
             // at controllable variables, and skipping one! (set to 0)
-            MTBDD low = CALL(clarify, str, mtbdd_set_next(cap_vars));
+            MTBDD low = clarify_CALL(lace, str, mtbdd_set_next(cap_vars));
             return mtbdd_makenode(next_cap, low, mtbdd_false);
         } else {
             // at controllable variables, and matching!
             if (mtbdd_getlow(str) != mtbdd_false) {
                 // we can take the low branch, so only take the low branch
-                MTBDD low = CALL(clarify, mtbdd_getlow(str), mtbdd_set_next(cap_vars));
+                MTBDD low = clarify_CALL(lace, mtbdd_getlow(str), mtbdd_set_next(cap_vars));
                 return mtbdd_makenode(next_cap, low, mtbdd_false);
             } else {
                 // unfortunately, we cannot take the low branch!
-                MTBDD high = CALL(clarify, mtbdd_gethigh(str), mtbdd_set_next(cap_vars));
+                MTBDD high = clarify_CALL(lace, mtbdd_gethigh(str), mtbdd_set_next(cap_vars));
                 return mtbdd_makenode(next_cap, mtbdd_false, high);
             }
         }
@@ -136,7 +137,7 @@ std::unique_ptr<pg::Game> SymGame::toExplicit(std::map<int, MTBDD> &vertex_to_bd
 
     // Compute the number of states with transitions
     auto states = sylvan_project(this->trans, s_vars);
-    auto noStates = (int)sylvan_satcount(states, s_vars);
+    auto noStates = (int)sylvan_satcount(states, s_vars, 0);
 
     // mapper will store for each [decoded] state in the symbolic game, the parity game node id
     std::map<int, int> mapper;
@@ -325,7 +326,8 @@ MTBDD select_str(MTBDD trans, MTBDD str)
  * Returns mtbdd_invalid if something is wrong.
  */
 typedef const std::map<MTBDD,MTBDD> strmap;
-TASK_3(MTBDD, apply_str, MTBDD, trans, strmap*, str, int, first_cap)
+TASK(MTBDD, apply_str, MTBDD, trans, strmap*, str, int, first_cap);
+MTBDD apply_str_CALL(lace_worker* lace, MTBDD trans, strmap* str, int first_cap)
 {
     if (mtbdd_isleaf(trans)) {
         return mtbdd_false; // no unsanctioned leaves!
@@ -333,9 +335,9 @@ TASK_3(MTBDD, apply_str, MTBDD, trans, strmap*, str, int, first_cap)
         auto var = mtbdd_getvar(trans);
         if (var < (unsigned)first_cap) {
             // state or uncontrollable ap
-            auto low = CALL(apply_str, mtbdd_getlow(trans), str, first_cap);
+            auto low = apply_str_CALL(lace, mtbdd_getlow(trans), str, first_cap);
             mtbdd_refs_push(low);
-            auto high = CALL(apply_str, mtbdd_gethigh(trans), str, first_cap);
+            auto high = apply_str_CALL(lace, mtbdd_gethigh(trans), str, first_cap);
             mtbdd_refs_push(high);
             if (low == mtbdd_invalid || high == mtbdd_invalid) {
                 mtbdd_refs_pop(2);
@@ -360,7 +362,7 @@ TASK_3(MTBDD, apply_str, MTBDD, trans, strmap*, str, int, first_cap)
 
 bool SymGame::applyStrategy(const std::map<MTBDD, MTBDD>& str)
 {
-    auto strategy = RUN(apply_str, this->trans, &str, mtbdd_set_first(cap_vars));
+    auto strategy = apply_str(this->trans, &str, mtbdd_set_first(cap_vars));
     if (strategy == mtbdd_invalid) {
         std::cout << "Unable to compute strategy" << std::endl;
         return false;
@@ -374,7 +376,7 @@ bool SymGame::applyStrategy(const std::map<MTBDD, MTBDD>& str)
 std::unique_ptr<pg::Game> SymGame::strategyToPG()
 {
     MTBDD states = sylvan_project(this->strategies, s_vars);
-    auto noStates = (long)sylvan_satcount(states, s_vars);
+    auto noStates = (long)sylvan_satcount(states, s_vars, 0);
 
     auto pargame = std::make_unique<pg::Game>(noStates);
 
@@ -400,7 +402,7 @@ std::unique_ptr<pg::Game> SymGame::strategyToPG()
     }
 
     // DO A THING
-    auto full = sylvan_and(this->trans, this->strategies);
+    auto full = sylvan_and(this->trans, this->strategies, 0);
     // We only care about priority 0 priostates
     while (!mtbdd_isleaf(full) && mtbdd_getvar(full) < (unsigned) this->priobits) {
         full = mtbdd_getlow(full);
@@ -551,7 +553,7 @@ bool SymGame::solve(bool verbose)
 
         {
             // Compute OneStepEven := (Distraction /\ OddPrio) \/ ~(Distraction \/ OddPrio)
-            MTBDD OddAndDistraction = sylvan_and(distractions, odd);
+            MTBDD OddAndDistraction = sylvan_and(distractions, odd, 0);
             mtbdd_refs_pushptr(&OddAndDistraction);
 
             MTBDD OddOrDistraction = sylvan_or(distractions, odd);
@@ -561,20 +563,20 @@ bool SymGame::solve(bool verbose)
             mtbdd_refs_popptr(2); // pop OddAndDistraction, OddOrDistraction
 
             // and convert to prime variables
-            onestepeven = sylvan_compose(onestepeven, ps_to_pns);
+            onestepeven = sylvan_compose(onestepeven, ps_to_pns, 0);
         }
 
         // then take product with transition
         // remember the strat: state -> uap -> cap
-        MTBDD strat = onestepeven = sylvan_and_exists(this->trans, onestepeven, pns_vars);
+        MTBDD strat = onestepeven = sylvan_and_exists(this->trans, onestepeven, pns_vars, 0);
         mtbdd_refs_pushptr(&strat);
 
         // Extract vertices won by even in one step = \forall U. \exists C. onestepeven
-        onestepeven = sylvan_exists(onestepeven, cap_vars);
-        onestepeven = sylvan_forall(onestepeven, uap_vars);
+        onestepeven = sylvan_exists(onestepeven, cap_vars, 0);
+        onestepeven = sylvan_forall(onestepeven, uap_vars, 0);
 
         // Restrict strat to states that are one step even (winning)
-        strat = sylvan_and(strat, onestepeven);
+        strat = sylvan_and(strat, onestepeven, 0);
 
         // those are won by Even in one step ...
         MTBDD newd = mtbdd_false;
@@ -582,13 +584,13 @@ bool SymGame::solve(bool verbose)
 
         if ((pr&1) == 0) {
             // new EVEN distractions are states that are NOT one step even
-            newd = sylvan_and(priostates[pr], sylvan_not(onestepeven));
+            newd = sylvan_and(priostates[pr], sylvan_not(onestepeven), 0);
         } else {
             // new ODD distractions are states that ARE one step even
-            newd = sylvan_and(priostates[pr], onestepeven);
+            newd = sylvan_and(priostates[pr], onestepeven, 0);
         }
         // remove vertices from newd that are already distractions
-        newd = sylvan_and(newd, sylvan_not(distractions));
+        newd = sylvan_and(newd, sylvan_not(distractions), 0);
 
         if (newd != sylvan_false) {
             // add to distractions
@@ -601,17 +603,17 @@ bool SymGame::solve(bool verbose)
             // remove vertices frozen at a higher priority
             for (int i=pr+1; i<=this->maxprio; i++) {
                 // remove each higher freeze set from <lwr>
-                lwr = sylvan_and(lwr, sylvan_not(freeze[i]));
+                lwr = sylvan_and(lwr, sylvan_not(freeze[i]), 0);
             }
 
             // HANDLING THE STRATEGY
             //   strat := good_state -> uap -> cap
             // (only good/useful strategies_bdd) this way, we only store useful strategies_bdd
             // first restrict strat to <lwr> (<=pr and not frozen higher)
-            strat = sylvan_and(strat, lwr);
+            strat = sylvan_and(strat, lwr, 0);
             // next restrict strat to not frozen lower (so we preserve the correct strategy)
             for (int i=0; i<=pr; i++) {
-                strat = sylvan_and(strat, sylvan_not(freeze[i]));
+                strat = sylvan_and(strat, sylvan_not(freeze[i]), 0);
             }
             // now strat is only for unfrozen vertices in the <=pr game
 
@@ -619,7 +621,7 @@ bool SymGame::solve(bool verbose)
             // strat = sylvan_project(strat, str_vars);
             MTBDD states_in_strat = sylvan_project(strat, ps_vars);
             mtbdd_refs_pushptr(&states_in_strat);
-            strategies_bdd = sylvan_ite(states_in_strat, strat, strategies_bdd); // big updater...
+            strategies_bdd = sylvan_ite(states_in_strat, strat, strategies_bdd, 0); // big updater...
             mtbdd_refs_popptr(1); // pop states_in_strat
 
             // NOW: freeze!
@@ -627,34 +629,34 @@ bool SymGame::solve(bool verbose)
             if (pr&1) {
                 // pr is odd, so freeze stuff won by even
                 // keep lower odd distractions
-                MTBDD oddlwr = sylvan_and(lwr, odd);
+                MTBDD oddlwr = sylvan_and(lwr, odd, 0);
                 mtbdd_refs_pushptr(&oddlwr);
-                oddlwr = sylvan_and(oddlwr, distractions);
+                oddlwr = sylvan_and(oddlwr, distractions, 0);
                 // keep lower even nondistractions
-                MTBDD evenlwr = sylvan_and(lwr, sylvan_not(odd));
+                MTBDD evenlwr = sylvan_and(lwr, sylvan_not(odd), 0);
                 mtbdd_refs_pushptr(&evenlwr);
-                evenlwr = sylvan_and(evenlwr, sylvan_not(distractions));
+                evenlwr = sylvan_and(evenlwr, sylvan_not(distractions), 0);
                 // take union as new freeze set
                 freeze[pr] = sylvan_or(oddlwr, evenlwr);
                 mtbdd_refs_popptr(2); // pop oddlwr, evenlwr
             } else {
                 // pr is even, so freeze stuff won by odd
                 // keep lower odd nondistractions
-                MTBDD oddlwr = sylvan_and(lwr, odd);
+                MTBDD oddlwr = sylvan_and(lwr, odd, 0);
                 mtbdd_refs_pushptr(&oddlwr);
-                oddlwr = sylvan_and(oddlwr, sylvan_not(distractions));
+                oddlwr = sylvan_and(oddlwr, sylvan_not(distractions), 0);
                 // keep lower even distractions
-                MTBDD evenlwr = sylvan_and(lwr, sylvan_not(odd));
+                MTBDD evenlwr = sylvan_and(lwr, sylvan_not(odd), 0);
                 mtbdd_refs_pushptr(&evenlwr);
-                evenlwr = sylvan_and(evenlwr, distractions);
+                evenlwr = sylvan_and(evenlwr, distractions, 0);
                 // take union as new freeze set
                 freeze[pr] = sylvan_or(oddlwr, evenlwr);
                 mtbdd_refs_popptr(2); // pop oddlwr, evenlwr
             }
 
             // select all lower not frozen at pr and reset them
-            lwr = sylvan_and(lwr, sylvan_not(freeze[pr]));
-            distractions = sylvan_and(distractions, sylvan_not(lwr));
+            lwr = sylvan_and(lwr, sylvan_not(freeze[pr]), 0);
+            distractions = sylvan_and(distractions, sylvan_not(lwr), 0);
             mtbdd_refs_popptr(1); // pop lwr
 
             // erase all lower freeze sets
@@ -666,16 +668,16 @@ bool SymGame::solve(bool verbose)
             // No distractions, so just update the strategy
 
             // Reduce strategy to <=pr game
-            strat = sylvan_and(strat, lowereq[pr]);
+            strat = sylvan_and(strat, lowereq[pr], 0);
             // Remove all frozen vertices from strat
             for (int i=0; i<=this->maxprio; i++) {
-                strat = sylvan_and(strat, sylvan_not(freeze[i]));
+                strat = sylvan_and(strat, sylvan_not(freeze[i]), 0);
             }
             // Now strat is only for unfrozen vertices in the <=pr game
             // Update <strategies_bdd> with <strat> but only for states in <strat>
             MTBDD states_in_strat = sylvan_project(strat, ps_vars);
             mtbdd_refs_pushptr(&states_in_strat);
-            strategies_bdd = sylvan_ite(states_in_strat, strat, strategies_bdd); // big updater...
+            strategies_bdd = sylvan_ite(states_in_strat, strat, strategies_bdd, 0); // big updater...
             mtbdd_refs_popptr(1); // pop states_in_strat
 
             pr++;
@@ -693,7 +695,7 @@ bool SymGame::solve(bool verbose)
     auto initial = BDDTools::encode_priostate(0, 0, s_vars, p_vars);
     mtbdd_refs_pushptr(&initial);
 
-    if (sylvan_and(initial, distractions) != sylvan_false) {
+    if (sylvan_and(initial, distractions, 0) != sylvan_false) {
         mtbdd_refs_popptr(6+3*this->maxprio); // free it up
 
         return false;
@@ -715,7 +717,7 @@ void SymGame::postprocess(bool verbose)
 {
     // Select "lowest" strategy [heuristic]
     // TODO it would be nicer if we could do bisimulation without this heuristic
-    strategies = RUN(clarify, strategies, cap_vars);
+    strategies = clarify(strategies, cap_vars);
 
     // Now remove all unreachable states according to the strategy  (slightly smaller controller)
     {
@@ -744,7 +746,7 @@ void SymGame::postprocess(bool verbose)
             mtbdd_refs_pushptr(&vars);
             vars = mtbdd_set_addall(vars, cap_vars);
             vars = mtbdd_set_addall(vars, uap_vars);
-            T = mtbdd_and_exists(strategies, this->trans, vars);
+            T = sylvan_and_exists(strategies, this->trans, vars, 0);
             mtbdd_refs_popptr(1);
         }
 
@@ -757,9 +759,9 @@ void SymGame::postprocess(bool verbose)
         // Just quick and dirty symbolic reachability ... this is not super efficient but it's OK
         while (old != visited) {
             old = visited;
-            auto next = mtbdd_and_exists(visited, T, s_vars); // cross product
+            auto next = sylvan_and_exists(visited, T, s_vars, 0); // cross product
             mtbdd_refs_push(next);
-            next = sylvan_compose(next, ns_to_s);   // and rename
+            next = sylvan_compose(next, ns_to_s, 0);   // and rename
             visited = sylvan_or(visited, next);
             mtbdd_refs_pop(1);
         }
@@ -768,12 +770,12 @@ void SymGame::postprocess(bool verbose)
 
         // count the number of states
         if (verbose) {
-            auto noStates = (long)sylvan_satcount(visited, s_vars);
+            auto noStates = (long)sylvan_satcount(visited, s_vars, 0);
             std::cerr << "after reachability: " << noStates << " states." << std::endl;
         }
 
-        strategies = sylvan_and(strategies, visited);
-        trans = sylvan_and(trans, strategies);
+        strategies = sylvan_and(strategies, visited, 0);
+        trans = sylvan_and(trans, strategies, 0);
         mtbdd_refs_popptr(4);
     }
 }
@@ -838,7 +840,7 @@ void SymGame::print_kiss(bool only_strategy)
     MTBDD _trans = this->trans;
     mtbdd_protect(&_trans);
     if (only_strategy) {
-        _trans = sylvan_and(_trans, this->strategies);
+        _trans = sylvan_and(_trans, this->strategies, 0);
     }
     MTBDD vars = mtbdd_set_empty();
     mtbdd_protect(&vars);
@@ -929,7 +931,7 @@ void SymGame::print_kiss(bool only_strategy)
     MTBDD _trans = this->trans;
     mtbdd_protect(&_trans);
     if (only_strategy) {
-        _trans = sylvan_and(_trans, this->strategies);
+        _trans = sylvan_and(_trans, this->strategies, 0);
     }
     MTBDD lf = mtbdd_enum_all_first(_trans, vars, arr, nullptr);
     while (lf != mtbdd_false) {

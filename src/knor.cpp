@@ -94,19 +94,22 @@ handleOptions(int &argc, char**& argv)
 }
 
 
-VOID_TASK_0(gc_start)
+TASK(void, gc_start);
+void gc_start_CALL(lace_worker* lace)
 {
     std::cerr << "starting garbage collection..." << std::endl;
 }
 
 
-VOID_TASK_0(gc_end)
+TASK(void, gc_end);
+void gc_end_CALL(lace_worker* lace)
 {
     std::cerr << "garbage collection finished." << std::endl;
 }
 
 
-TASK_1(int, main_task, cxxopts::ParseResult*, _options)
+TASK(int, main_task, cxxopts::ParseResult*, _options);
+int main_task_CALL(lace_worker* lace, cxxopts::ParseResult* _options)
 {
     auto & options = *_options;
 
@@ -175,8 +178,8 @@ TASK_1(int, main_task, cxxopts::ParseResult*, _options)
     sylvan_init_package();
     sylvan_init_mtbdd();
     sylvan_init_zdd();
-    if (verbose) sylvan_gc_hook_pregc(TASK(gc_start));
-    if (verbose) sylvan_gc_hook_postgc(TASK(gc_end));
+    if (verbose) sylvan_gc_hook_pregc(gc_start_CALL);
+    if (verbose) sylvan_gc_hook_postgc(gc_end_CALL);
 
     bool explicit_solver = options["sym"].count() == 0;
     bool naive_splitting = options["naive"].count() > 0;
@@ -219,9 +222,9 @@ TASK_1(int, main_task, cxxopts::ParseResult*, _options)
             if (verbose) std::cerr << "\033[1;37mfinished constructing symbolic game in " << std::fixed << (t_2 - t_1) << " sec.\033[m" << std::endl;
             if (bisim_game) {
                 const double t_before = wctime();
-                MTBDD partition = CALL(min_lts_strong, sym.get(), false);
+                MTBDD partition = min_lts_strong_CALL(lace, sym.get(), false);
                 mtbdd_protect(&partition);
-                CALL(minimize, sym.get(), partition, verbose);
+                minimize_CALL(lace, sym.get(), partition, verbose);
                 mtbdd_unprotect(&partition);
                 if (verbose) {
                      std::cerr << "after bisimulation minimisation: " << count_blocks() << " blocks." << std::endl;
@@ -317,9 +320,9 @@ TASK_1(int, main_task, cxxopts::ParseResult*, _options)
 
         if (bisim_game) {
             const double t_before = wctime();
-            MTBDD partition = CALL(min_lts_strong, sym.get(), false);
+            MTBDD partition = min_lts_strong_CALL(lace, sym.get(), false);
             mtbdd_protect(&partition);
-            CALL(minimize, sym.get(), partition, verbose);
+            minimize_CALL(lace, sym.get(), partition, verbose);
             mtbdd_unprotect(&partition);
             if (verbose) {
                 std::cerr << "after bisimulation minimisation: " << count_blocks() << " blocks." << std::endl;
@@ -406,12 +409,12 @@ TASK_1(int, main_task, cxxopts::ParseResult*, _options)
 
     if (bisim_sol || best) {
         const auto t_before = wctime();
-        MTBDD partition = CALL(min_lts_strong, sym.get(), true);
+        MTBDD partition = min_lts_strong_CALL(lace, sym.get(), true);
         mtbdd_protect(&partition);
         if (verbose) {
-            // CALL(print_partition, sym, partition);
+            // print_partition_CALL(lace, sym, partition);
         }
-        CALL(minimize, sym.get(), partition, verbose);
+        minimize_CALL(lace, sym.get(), partition, verbose);
         mtbdd_unprotect(&partition);
         const auto t_after = wctime();
         if (verbose) std::cerr << "\033[1;37mfinished bisimulation minimisation of solution in " << std::fixed << (t_after - t_before) << " sec.\033[m" << std::endl;
@@ -562,10 +565,10 @@ main(int argc, char* argv[])
     auto options = handleOptions(argc, argv);
 
     // Initialize Lace, only 1 worker
-    lace_start(1, 1024*1024*2); // initialize Lace, but sequentially
+    lace_start(1, 1024*1024*2, 0); // initialize Lace, but sequentially
                                 // also get a large enough task size... (2M tasks) for PSI!
 
-    int res = RUN(main_task, &options);
+    int res = main_task(&options);
 
     lace_stop();
 

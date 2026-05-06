@@ -1,0 +1,100 @@
+name: Build and publish strahler-knor docker image
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  release:
+    types: [published]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # Smoke build: compile knor on the GitHub-hosted linux/amd64 runner so a
+  # broken build doesn't slip through the docker job (which only ships
+  # sources and would never exercise the compiler at image-build time).
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake make flex bison libboost-all-dev
+
+      - name: Compile knor
+        run: bash scripts/compile.sh
+
+      - name: Smoke-test --strpm-simd on a sample
+        run: |
+          ./scripts/knor-strpm-simd.sh examples/full_arbiter_2.tlsf.ehoa -a -v > /tmp/out.aag
+          rc=$?
+          # 10 = realizable, 20 = unrealizable; both are healthy outcomes.
+          if [ "$rc" -ne 10 ] && [ "$rc" -ne 20 ]; then
+            echo "knor exited with unexpected code $rc"
+            exit 1
+          fi
+          test -s /tmp/out.aag
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # The strahler-knor image only ships SOURCES; the user runs
+      # scripts/compile.sh inside the container with -march=native. So no
+      # cross-arch native compile happens at image-build time, and the QEMU
+      # overhead for the linux/arm64 leg is negligible.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute lowercase image name
+        id: img
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/strahler-knors" >> "$GITHUB_OUTPUT"
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.img.outputs.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=sha-,format=short
+
+      - name: Build and push (linux/amd64, linux/arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

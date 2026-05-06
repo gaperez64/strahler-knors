@@ -277,7 +277,7 @@ AIGEncoder::processSOP()
         // TODO: remove assumption that the CAP vars are consecutive
         cap_bdd = sylvan_ithvar(mtbdd_set_first(game.cap_vars) + i);
         // keep just s and u... get rid of other cap variables
-        cap_bdd = sylvan_and_exists(game.strategies, cap_bdd, game.cap_vars);
+        cap_bdd = sylvan_and_exists(game.strategies, cap_bdd, game.cap_vars, 0);
 
         {
             uint8_t state_arr_2[game.statebits];
@@ -357,7 +357,7 @@ AIGEncoder::processSOP()
     mtbdd_protect(&su_vars);
 
     // full is: s > u > ns
-    MTBDD full = mtbdd_and_exists(game.strategies, game.trans, su_vars);
+    MTBDD full = sylvan_and_exists(game.strategies, game.trans, su_vars, 0);
     mtbdd_protect(&full);
 
     std::vector<int> states_vec;
@@ -376,7 +376,7 @@ AIGEncoder::processSOP()
         // encode state using NS vars
         cap_bdd = BDDTools::encode_state(state, game.ns_vars);
         // keep s > u of this state
-        cap_bdd = sylvan_and_exists(full, cap_bdd, game.ns_vars);
+        cap_bdd = sylvan_and_exists(full, cap_bdd, game.ns_vars, 0);
 
         // this gives source states and UAP for this state
         auto uaps = BDDTools::collectSubroots(cap_bdd, mtbdd_set_first(game.uns_vars));
@@ -539,7 +539,7 @@ void AIGEncoder::processOnehot()
     for (int i=0; i<game.cap_count; i++) {
         cap_bdd = sylvan_ithvar(mtbdd_set_first(game.cap_vars)+i);
         // keep just s and u... get rid of other cap variables
-        cap_bdd = sylvan_and_exists(game.strategies, cap_bdd, game.cap_vars);
+        cap_bdd = sylvan_and_exists(game.strategies, cap_bdd, game.cap_vars, 0);
 
         // this gives source states and UAP for this cap
         auto uaps = BDDTools::collectSubroots(cap_bdd, mtbdd_set_first(game.uns_vars));
@@ -582,10 +582,10 @@ void AIGEncoder::processOnehot()
     mtbdd_protect(&su_vars);
 
     // full is: s > u > ns
-    MTBDD full = mtbdd_and_exists(game.strategies, game.trans, su_vars);
+    MTBDD full = sylvan_and_exists(game.strategies, game.trans, su_vars, 0);
     mtbdd_protect(&full);
 
-    // long noStates = (long)sylvan_satcount(states, game.s_vars);
+    // long noStates = (long)sylvan_satcount(states, game.s_vars, 0);
     // std::cerr << "number of states: " << noStates << std::endl;
 
     uint8_t state_arr[game.statebits];
@@ -601,7 +601,7 @@ void AIGEncoder::processOnehot()
         // encode state using NS vars
         cap_bdd = BDDTools::encode_state(state, game.ns_vars);
         // keep s > u of this state
-        cap_bdd = sylvan_and_exists(full, cap_bdd, game.ns_vars);
+        cap_bdd = sylvan_and_exists(full, cap_bdd, game.ns_vars, 0);
 
         // std::cerr << "state " << state << /*" to has " << s <<*/ std::endl;
 
@@ -677,14 +677,14 @@ void AIGEncoder::processBinary()
         cap_bdds[i] = sylvan_ithvar(mtbdd_set_first(game.cap_vars) + i);
         mtbdd_protect(&cap_bdds[i]);
         // keep just s and u... get rid of cap variables
-        cap_bdds[i] = sylvan_and_exists(game.strategies, cap_bdds[i], game.cap_vars);
+        cap_bdds[i] = sylvan_and_exists(game.strategies, cap_bdds[i], game.cap_vars, 0);
     }
 
     // now we compute the full BDD excluding priority and controllable AP
     // the BDD "full" is defined on variables state -> uap -> next state
     MTBDD pc_vars = mtbdd_set_addall(game.np_vars, game.cap_vars);
     mtbdd_protect(&pc_vars);
-    MTBDD full = mtbdd_and_exists(game.strategies, game.trans, pc_vars);
+    MTBDD full = sylvan_and_exists(game.strategies, game.trans, pc_vars, 0);
     mtbdd_protect(&full);
 
     // compute bdds for each state variable
@@ -692,7 +692,7 @@ void AIGEncoder::processBinary()
         state_bdds[i] = sylvan_ithvar(mtbdd_set_first(game.ns_vars) + i);
         mtbdd_protect(&state_bdds[i]);
         // keep just s and u... get rid of next state variables
-        state_bdds[i] = sylvan_and_exists(full, state_bdds[i], game.ns_vars);
+        state_bdds[i] = sylvan_and_exists(full, state_bdds[i], game.ns_vars, 0);
     }
 
     mtbdd_unprotect(&full);
@@ -746,10 +746,10 @@ void AIGEncoder::processBinary()
                 s_to_s = mtbdd_map_add(s_to_s, bddvars.at(i), sylvan_ithvar(bddvars.at(game.statebits-i-1)));
             }
             for (int i=0; i<game.cap_count; i++) {
-                cap_bdds[i] = sylvan_compose(cap_bdds[i], s_to_s);
+                cap_bdds[i] = sylvan_compose(cap_bdds[i], s_to_s, 0);
             }
             for (int i=0; i<game.statebits; i++) {
-                state_bdds[i] = sylvan_compose(state_bdds[i], s_to_s);
+                state_bdds[i] = sylvan_compose(state_bdds[i], s_to_s, 0);
             }
             mtbdd_unprotect(&s_to_s);
             for (int i=0; i<game.statebits; i++) {
