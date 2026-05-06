@@ -34,6 +34,9 @@ jobs:
         run: bash scripts/compile.sh
 
       - name: Smoke-test --strpm-simd on a sample
+        # Actions runs `bash -e` by default; knor's "realizable" exit code 10
+        # would otherwise kill the step before we can inspect it.
+        shell: bash {0}
         run: |
           ./scripts/knor-strpm-simd.sh examples/full_arbiter_2.tlsf.ehoa -a -v > /tmp/out.aag
           rc=$?
